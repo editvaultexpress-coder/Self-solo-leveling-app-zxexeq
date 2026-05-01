@@ -1,0 +1,573 @@
+import { useState, useCallback, useEffect } from "react";
+
+// ── helpers ──────────────────────────────────────────────────────────────────
+const generateId = () => Math.random().toString(36).substring(2, 15);
+
+const EXP_PER_LEVEL = (level) => 1000 + (level - 1) * 200;
+
+const formatExp = (exp) => {
+  if (exp >= 1000000) return `${(exp / 1000000).toFixed(1)}M`;
+  if (exp >= 1000) return `${(exp / 1000).toFixed(1)}K`;
+  return exp.toString();
+};
+
+const getGreeting = () => {
+  const h = new Date().getHours();
+  if (h < 6) return "Night Owl";
+  if (h < 12) return "Good Morning";
+  if (h < 18) return "Good Afternoon";
+  return "Good Evening";
+};
+
+const getTimeUntilReset = () => {
+  const now = new Date();
+  const tomorrow = new Date(now);
+  tomorrow.setDate(tomorrow.getDate() + 1);
+  tomorrow.setHours(0, 0, 0, 0);
+  const diff = tomorrow - now;
+  return {
+    hours: Math.floor(diff / 3600000),
+    minutes: Math.floor((diff % 3600000) / 60000),
+  };
+};
+
+// ── constants ─────────────────────────────────────────────────────────────────
+const TASK_CATEGORIES = {
+  sleep:    { name: "Sleep",     icon: "🌙", color: "#8b5cf6" },
+  workout:  { name: "Workout",   icon: "🏋️", color: "#ef4444" },
+  nutrition:{ name: "Nutrition", icon: "🍎", color: "#22c55e" },
+  water:    { name: "Hydration", icon: "💧", color: "#06b6d4" },
+  study:    { name: "Study",     icon: "📖", color: "#3b82f6" },
+  looksmax: { name: "Self-Care", icon: "✨", color: "#ec4899" },
+  custom:   { name: "Custom",    icon: "⚡", color: "#eab308" },
+};
+
+const STAT_LABELS = {
+  strength:     { name: "Strength",     color: "#ef4444" },
+  endurance:    { name: "Endurance",    color: "#f97316" },
+  intelligence: { name: "Intelligence", color: "#3b82f6" },
+  discipline:   { name: "Discipline",   color: "#8b5cf6" },
+  charisma:     { name: "Charisma",     color: "#ec4899" },
+  vitality:     { name: "Vitality",     color: "#22c55e" },
+};
+
+const GOALS = [
+  { value: "fitness",   label: "Fitness & Health",  icon: "💪" },
+  { value: "study",     label: "Academic Growth",   icon: "📚" },
+  { value: "nutrition", label: "Nutrition & Diet",  icon: "🥗" },
+  { value: "lifestyle", label: "Lifestyle Balance", icon: "⚖️" },
+  { value: "social",    label: "Social Skills",     icon: "👥" },
+  { value: "career",    label: "Career Progress",   icon: "🎯" },
+];
+
+const defaultTasks = [
+  { id: "1", category: "sleep",    name: "Sleep Tracking",    description: "Log your sleep hours and quality",  completed: false, expReward: 150 },
+  { id: "2", category: "workout",  name: "Workout Session",   description: "Track your exercise routine",        completed: false, expReward: 200 },
+  { id: "3", category: "nutrition",name: "Nutrition Log",     description: "Track your meals and macros",        completed: false, expReward: 175 },
+  { id: "4", category: "water",    name: "Hydration Check",   description: "Track water intake",                 completed: false, expReward: 100 },
+  { id: "5", category: "study",    name: "Study Session",     description: "Log study time and take quiz",       completed: false, expReward: 250 },
+  { id: "6", category: "looksmax", name: "Self-Care Routine", description: "Complete grooming habits",           completed: false, expReward: 125 },
+];
+
+// ── styles (inline so artifact is self-contained) ─────────────────────────────
+const css = `
+  @import url('https://fonts.googleapis.com/css2?family=Orbitron:wght@700;900&family=Inter:wght@400;500;600;700&display=swap');
+  * { box-sizing: border-box; margin: 0; padding: 0; }
+  body { background: #020617; font-family: 'Inter', sans-serif; color: #fff; }
+  ::-webkit-scrollbar { width: 4px; }
+  ::-webkit-scrollbar-track { background: #0f172a; }
+  ::-webkit-scrollbar-thumb { background: #06b6d4; border-radius: 4px; }
+
+  @keyframes shimmer { 0%{transform:translateX(-100%)} 100%{transform:translateX(200%)} }
+  @keyframes pulse-glow { 0%,100%{text-shadow:0 0 20px #06b6d4} 50%{text-shadow:0 0 60px #06b6d4, 0 0 100px #8b5cf6} }
+  @keyframes fadeInUp { from{opacity:0;transform:translateY(16px)} to{opacity:1;transform:translateY(0)} }
+  @keyframes scaleIn { from{opacity:0;transform:scale(0.8)} to{opacity:1;transform:scale(1)} }
+  @keyframes slideUp { from{transform:translateY(100%)} to{transform:translateY(0)} }
+
+  .fadeInUp { animation: fadeInUp 0.3s ease forwards; }
+  .scaleIn  { animation: scaleIn  0.4s cubic-bezier(.34,1.56,.64,1) forwards; }
+`;
+
+// ── tiny components ───────────────────────────────────────────────────────────
+function GlowCard({ children, className = "", glowing = false, onClick, style = {} }) {
+  return (
+    <div
+      onClick={onClick}
+      style={{
+        position: "relative", overflow: "hidden", borderRadius: 16,
+        background: "#0f172a", border: "1px solid rgba(6,182,212,0.25)",
+        boxShadow: glowing ? "0 0 24px rgba(6,182,212,0.15)" : "none",
+        cursor: onClick ? "pointer" : "default",
+        transition: "box-shadow 0.2s",
+        ...style,
+      }}
+      className={className}
+    >
+      {glowing && (
+        <div style={{
+          position:"absolute",inset:0,
+          background:"linear-gradient(135deg,rgba(6,182,212,0.04),transparent,rgba(139,92,246,0.04))",
+          pointerEvents:"none"
+        }}/>
+      )}
+      <div style={{position:"relative",zIndex:1}}>{children}</div>
+    </div>
+  );
+}
+
+function GlowButton({ children, onClick, variant = "primary", disabled = false, style = {} }) {
+  const styles = {
+    primary:   { background:"#06b6d4", color:"#0f172a", border:"none", boxShadow:"0 4px 16px rgba(6,182,212,0.3)" },
+    secondary: { background:"#1e293b", color:"#06b6d4", border:"1px solid rgba(6,182,212,0.4)" },
+    ghost:     { background:"transparent", color:"#06b6d4", border:"none" },
+  };
+  return (
+    <button
+      onClick={onClick}
+      disabled={disabled}
+      style={{
+        fontFamily:"'Inter',sans-serif", fontWeight:600, fontSize:14,
+        padding:"10px 20px", borderRadius:12, cursor: disabled ? "not-allowed" : "pointer",
+        opacity: disabled ? 0.5 : 1, transition:"all 0.15s",
+        display:"flex", alignItems:"center", justifyContent:"center", gap:6,
+        ...styles[variant], ...style,
+      }}
+    >
+      {children}
+    </button>
+  );
+}
+
+function ExpBar({ current, max, level, isAnimating }) {
+  const pct = Math.min((current / max) * 100, 100);
+  return (
+    <div>
+      <div style={{display:"flex",justifyContent:"space-between",marginBottom:8}}>
+        <span style={{fontFamily:"'Orbitron',sans-serif",color:"#06b6d4",fontWeight:700}}>LVL {level}</span>
+        <span style={{color:"#94a3b8",fontSize:13}}>{formatExp(current)} / {formatExp(max)} EXP</span>
+      </div>
+      <div style={{height:12,background:"#1e293b",borderRadius:999,overflow:"hidden",border:"1px solid rgba(6,182,212,0.2)",position:"relative"}}>
+        <div style={{height:"100%",width:`${pct}%`,background:"linear-gradient(90deg,#06b6d4,#8b5cf6)",transition:"width 0.5s ease",borderRadius:999}}/>
+        {isAnimating && (
+          <div style={{position:"absolute",inset:0,background:"linear-gradient(90deg,transparent,rgba(255,255,255,0.3),transparent)",animation:"shimmer 1s infinite"}}/>
+        )}
+      </div>
+    </div>
+  );
+}
+
+// ── Header ────────────────────────────────────────────────────────────────────
+function Header({ user, isLevelingUp }) {
+  const { hours, minutes } = getTimeUntilReset();
+  return (
+    <header style={{background:"#020617",borderBottom:"1px solid rgba(6,182,212,0.15)",padding:"16px"}}>
+      <div style={{maxWidth:480,margin:"0 auto"}}>
+        <div style={{display:"flex",alignItems:"center",justifyContent:"space-between",marginBottom:16}}>
+          <div>
+            <p style={{color:"#64748b",fontSize:13}}>{getGreeting()},</p>
+            <h1 style={{fontFamily:"'Orbitron',sans-serif",fontSize:20,fontWeight:900,color:"#fff"}}>{user.displayName}</h1>
+          </div>
+          <div style={{display:"flex",gap:8}}>
+            <button style={{background:"transparent",border:"none",color:"#64748b",cursor:"pointer",padding:8,borderRadius:8,position:"relative"}}>
+              🔔 <span style={{position:"absolute",top:6,right:6,width:6,height:6,background:"#ef4444",borderRadius:"50%",display:"block"}}/>
+            </button>
+            <button style={{background:"transparent",border:"none",color:"#64748b",cursor:"pointer",padding:8,borderRadius:8}}>⚙️</button>
+          </div>
+        </div>
+        <ExpBar current={user.exp} max={user.expToNext} level={user.level} isAnimating={isLevelingUp}/>
+        <div style={{display:"flex",justifyContent:"space-between",marginTop:8,fontSize:12}}>
+          <span style={{color:"#475569"}}>Reset in <span style={{color:"#06b6d4",fontWeight:600}}>{hours}h {minutes}m</span></span>
+          <span style={{color:"#8b5cf6"}}>{user.goals.length} active goals</span>
+        </div>
+      </div>
+    </header>
+  );
+}
+
+// ── Navigation ────────────────────────────────────────────────────────────────
+function Navigation({ active, onChange }) {
+  const tabs = [
+    { id:"tasks",   label:"Tasks",   icon:"🏠" },
+    { id:"stats",   label:"Stats",   icon:"📊" },
+    { id:"squad",   label:"Squad",   icon:"👥" },
+    { id:"profile", label:"Profile", icon:"👤" },
+  ];
+  return (
+    <nav style={{position:"fixed",bottom:0,left:0,right:0,background:"rgba(2,6,23,0.97)",borderTop:"1px solid rgba(6,182,212,0.15)",backdropFilter:"blur(12px)",zIndex:40}}>
+      <div style={{maxWidth:480,margin:"0 auto",padding:"0 16px"}}>
+        <div style={{display:"flex",justifyContent:"space-around"}}>
+          {tabs.map(t => (
+            <button
+              key={t.id}
+              onClick={() => onChange(t.id)}
+              style={{
+                background:"transparent",border:"none",cursor:"pointer",
+                display:"flex",flexDirection:"column",alignItems:"center",gap:4,
+                padding:"12px 16px", color: active===t.id ? "#06b6d4" : "#475569",
+                transition:"color 0.2s", position:"relative",
+                fontFamily:"'Inter',sans-serif",fontSize:11,fontWeight:600,
+              }}
+            >
+              {active===t.id && (
+                <div style={{position:"absolute",top:0,left:"50%",transform:"translateX(-50%)",width:28,height:3,background:"#06b6d4",borderRadius:999}}/>
+              )}
+              <span style={{fontSize:20}}>{t.icon}</span>
+              {t.label}
+            </button>
+          ))}
+        </div>
+      </div>
+    </nav>
+  );
+}
+
+// ── TaskCard ──────────────────────────────────────────────────────────────────
+function TaskCard({ task, onComplete, onExpand }) {
+  const cat = TASK_CATEGORIES[task.category];
+  return (
+    <GlowCard glowing={task.completed} style={{marginBottom:10}}>
+      <div style={{padding:16,display:"flex",alignItems:"center",gap:12}}>
+        <button
+          onClick={onComplete}
+          style={{
+            flexShrink:0,width:26,height:26,borderRadius:8,
+            border: task.completed ? "none" : "2px solid #334155",
+            background: task.completed ? "#06b6d4" : "transparent",
+            cursor:"pointer",display:"flex",alignItems:"center",justifyContent:"center",
+            transition:"all 0.25s",
+          }}
+        >
+          {task.completed && <span style={{fontSize:14,color:"#0f172a",fontWeight:900}}>✓</span>}
+        </button>
+        <div style={{flex:1,minWidth:0}}>
+          <div style={{display:"flex",alignItems:"center",gap:6,marginBottom:4}}>
+            <span style={{fontSize:18}}>{cat.icon}</span>
+            <span style={{fontWeight:600,color:task.completed?"#475569":"#fff",textDecoration:task.completed?"line-through":"none",fontSize:15}}>
+              {task.name}
+            </span>
+          </div>
+          <p style={{fontSize:12,color:"#64748b",marginBottom:6}}>{task.description}</p>
+          <span style={{fontSize:12,fontWeight:600,color:task.completed?"#475569":cat.color}}>+{task.expReward} EXP</span>
+        </div>
+        <button onClick={onExpand} style={{background:"transparent",border:"none",cursor:"pointer",color:"#475569",fontSize:18,padding:4}}>›</button>
+      </div>
+    </GlowCard>
+  );
+}
+
+// ── TaskInputModal ─────────────────────────────────────────────────────────────
+function TaskInputModal({ task, isOpen, onClose, onSubmit }) {
+  const [formData, setFormData] = useState({});
+  if (!isOpen || !task) return null;
+
+  const inp = (placeholder, key, type="text", extra={}) => (
+    <input
+      type={type}
+      placeholder={placeholder}
+      {...extra}
+      onChange={e => setFormData(p => ({...p,[key]:type==="number"?Number(e.target.value):e.target.value}))}
+      style={{
+        width:"100%",padding:"10px 14px",borderRadius:10,marginTop:6,
+        background:"#1e293b",border:"1px solid rgba(6,182,212,0.2)",
+        color:"#fff",fontSize:14,fontFamily:"'Inter',sans-serif",outline:"none",
+      }}
+    />
+  );
+
+  const fields = {
+    sleep: <><label style={lbl}>Hours Slept</label>{inp("8","sleepHours","number")}<label style={{...lbl,marginTop:12}}>Sleep Quality (1–10)</label>{inp("8","sleepQuality","number",{min:1,max:10})}</>,
+    workout: <><label style={lbl}>Workout Type</label>{inp("Strength Training","workoutType")}<label style={{...lbl,marginTop:12}}>Duration (min)</label>{inp("45","workoutDuration","number")}</>,
+    nutrition: <><label style={lbl}>Calories</label>{inp("2000","caloriesConsumed","number")}<label style={{...lbl,marginTop:12}}>Protein (g)</label>{inp("150","protein","number")}</>,
+    water: <><label style={lbl}>Water (liters)</label>{inp("2.5","waterLiters","number",{step:"0.1"})}</>,
+    study: <><label style={lbl}>Topic Studied</label>{inp("Calculus – Integration","studyTopic")}<p style={{fontSize:12,color:"#64748b",marginTop:8}}>AI will generate a quiz for bonus EXP</p></>,
+    looksmax: (
+      <div>
+        <label style={lbl}>Completed Habits</label>
+        <div style={{display:"grid",gridTemplateColumns:"1fr 1fr",gap:8,marginTop:8}}>
+          {["Skincare","Posture","Hygiene","Style"].map(h => (
+            <label key={h} style={{display:"flex",alignItems:"center",gap:8,color:"#94a3b8",fontSize:14,cursor:"pointer"}}>
+              <input type="checkbox" onChange={e=>{
+                setFormData(p=>{
+                  const cur=p.groomingTasks||[];
+                  return{...p,groomingTasks:e.target.checked?[...cur,h]:cur.filter(x=>x!==h)};
+                });
+              }} style={{accentColor:"#06b6d4"}}/>
+              {h}
+            </label>
+          ))}
+        </div>
+      </div>
+    ),
+  };
+
+  return (
+    <div style={{position:"fixed",inset:0,zIndex:50,display:"flex",alignItems:"flex-end",justifyContent:"center",background:"rgba(2,6,23,0.85)"}} onClick={onClose}>
+      <div onClick={e=>e.stopPropagation()} style={{width:"100%",maxWidth:480,background:"#0f172a",borderRadius:"24px 24px 0 0",border:"1px solid rgba(6,182,212,0.25)",padding:24,animation:"slideUp 0.3s cubic-bezier(.34,1.56,.64,1)"}}>
+        <div style={{display:"flex",justifyContent:"space-between",alignItems:"center",marginBottom:20}}>
+          <h2 style={{fontFamily:"'Orbitron',sans-serif",fontSize:18,fontWeight:700}}>{task.name}</h2>
+          <button onClick={onClose} style={{background:"transparent",border:"none",color:"#64748b",cursor:"pointer",fontSize:20}}>✕</button>
+        </div>
+        {fields[task.category] || null}
+        <div style={{display:"flex",gap:10,marginTop:20}}>
+          <GlowButton variant="secondary" onClick={onClose} style={{flex:1}}>Cancel</GlowButton>
+          <GlowButton onClick={()=>{onSubmit(task.id,formData);onClose();setFormData({});}} style={{flex:1}}>Log & Complete</GlowButton>
+        </div>
+      </div>
+    </div>
+  );
+}
+const lbl = {display:"block",fontSize:13,color:"#94a3b8",fontWeight:500};
+
+// ── LevelUpOverlay ────────────────────────────────────────────────────────────
+function LevelUpOverlay({ isVisible, level }) {
+  if (!isVisible) return null;
+  return (
+    <div style={{position:"fixed",inset:0,zIndex:60,display:"flex",alignItems:"center",justifyContent:"center",background:"rgba(2,6,23,0.92)"}}>
+      <div style={{textAlign:"center",animation:"scaleIn 0.5s cubic-bezier(.34,1.56,.64,1)"}}>
+        <div style={{fontFamily:"'Orbitron',sans-serif",fontSize:52,fontWeight:900,color:"#06b6d4",animation:"pulse-glow 1.5s infinite"}}>LEVEL UP!</div>
+        <div style={{fontFamily:"'Orbitron',sans-serif",fontSize:40,fontWeight:700,color:"#8b5cf6",marginTop:8}}>Level {level}</div>
+        <div style={{height:2,background:"linear-gradient(90deg,transparent,#06b6d4,transparent)",marginTop:20,borderRadius:999}}/>
+      </div>
+    </div>
+  );
+}
+
+// ── Panels ────────────────────────────────────────────────────────────────────
+function TasksPanel({ tasks, onComplete, onAddExp }) {
+  const [selectedTask, setSelectedTask] = useState(null);
+  const [modalOpen, setModalOpen] = useState(false);
+  const done = tasks.filter(t=>t.completed).length;
+
+  return (
+    <div style={{animation:"fadeInUp 0.25s ease"}}>
+      <div style={{display:"flex",justifyContent:"space-between",alignItems:"center",marginBottom:12}}>
+        <div>
+          <h2 style={{fontFamily:"'Orbitron',sans-serif",fontSize:17,fontWeight:700}}>Daily Quests</h2>
+          <p style={{color:"#64748b",fontSize:13,marginTop:2}}>{done}/{tasks.length} completed</p>
+        </div>
+        <div style={{display:"flex",alignItems:"center",gap:6,padding:"6px 14px",borderRadius:999,background:"rgba(249,115,22,0.15)"}}>
+          <span>🔥</span>
+          <span style={{fontSize:13,fontWeight:700,color:"#f97316"}}>7 day streak</span>
+        </div>
+      </div>
+
+      <div style={{height:8,background:"#1e293b",borderRadius:999,overflow:"hidden",marginBottom:16}}>
+        <div style={{height:"100%",width:`${(done/tasks.length)*100}%`,background:"linear-gradient(90deg,#06b6d4,#8b5cf6)",transition:"width 0.4s ease"}}/>
+      </div>
+
+      {tasks.map(task => (
+        <TaskCard
+          key={task.id}
+          task={task}
+          onComplete={()=>{ if(!task.completed){onComplete(task.id,{});onAddExp(task.expReward);} }}
+          onExpand={()=>{ setSelectedTask(task); setModalOpen(true); }}
+        />
+      ))}
+
+      <GlowButton variant="secondary" style={{width:"100%",marginTop:8}}>＋ Add Custom Task</GlowButton>
+
+      <TaskInputModal
+        task={selectedTask}
+        isOpen={modalOpen}
+        onClose={()=>setModalOpen(false)}
+        onSubmit={(id,data)=>{ const t=tasks.find(x=>x.id===id); if(t){onComplete(id,data);onAddExp(t.expReward);} }}
+      />
+    </div>
+  );
+}
+
+function StatsPanel({ stats, level }) {
+  const keys = Object.keys(stats);
+  return (
+    <div style={{animation:"fadeInUp 0.25s ease"}}>
+      <div style={{textAlign:"center",marginBottom:24}}>
+        <div style={{width:96,height:96,borderRadius:"50%",background:"linear-gradient(135deg,#06b6d4,#8b5cf6)",display:"inline-flex",alignItems:"center",justifyContent:"center",marginBottom:8}}>
+          <span style={{fontFamily:"'Orbitron',sans-serif",fontSize:36,fontWeight:900,color:"#0f172a"}}>{level}</span>
+        </div>
+        <p style={{color:"#64748b",fontSize:14}}>Current Level</p>
+      </div>
+      <div style={{display:"flex",flexDirection:"column",gap:10}}>
+        {keys.map((key,i) => {
+          const s = STAT_LABELS[key];
+          return (
+            <GlowCard key={key} style={{padding:16,animationDelay:`${i*0.05}s`}}>
+              <div style={{display:"flex",alignItems:"center",justifyContent:"space-between",marginBottom:8}}>
+                <span style={{fontWeight:600,fontSize:15}}>{s.name}</span>
+                <span style={{fontFamily:"'Orbitron',sans-serif",fontSize:22,fontWeight:700,color:s.color}}>{stats[key]}</span>
+              </div>
+              <div style={{height:6,background:"#1e293b",borderRadius:999,overflow:"hidden"}}>
+                <div style={{height:"100%",width:`${stats[key]}%`,background:s.color,borderRadius:999,transition:"width 0.5s ease"}}/>
+              </div>
+            </GlowCard>
+          );
+        })}
+      </div>
+    </div>
+  );
+}
+
+function SquadPanel() {
+  const members = [
+    { id:"1",name:"Neon Guardian",level:12,contribution:2450,rank:"S",role:"leader" },
+    { id:"2",name:"Cyber Knight",  level:9, contribution:1890,rank:"A",role:"officer" },
+    { id:"3",name:"Pixel Warrior", level:8, contribution:1650,rank:"A",role:"member" },
+    { id:"4",name:"Byte Hunter",   level:7, contribution:1200,rank:"B",role:"member" },
+    { id:"5",name:"Data Sage",     level:6, contribution:980, rank:"B",role:"member" },
+  ];
+  const rankColor = {S:"#eab308",A:"#06b6d4",B:"#8b5cf6",C:"#64748b",D:"#475569"};
+
+  return (
+    <div style={{animation:"fadeInUp 0.25s ease"}}>
+      <GlowCard glowing style={{padding:20,marginBottom:12}}>
+        <div style={{display:"flex",alignItems:"center",gap:16,marginBottom:16}}>
+          <div style={{width:64,height:64,borderRadius:16,background:"linear-gradient(135deg,#8b5cf6,#06b6d4)",display:"flex",alignItems:"center",justifyContent:"center",fontSize:28}}>👥</div>
+          <div>
+            <h2 style={{fontFamily:"'Orbitron',sans-serif",fontSize:18,fontWeight:700}}>Neon Strikers</h2>
+            <p style={{color:"#64748b",fontSize:13}}>Diamond Rank • 5 Members</p>
+          </div>
+        </div>
+        <div style={{display:"grid",gridTemplateColumns:"1fr 1fr 1fr",gap:10}}>
+          {[["🏆","#12","Global Rank"],["🎯","8,170","Total EXP"],["💬","24","Missions"]].map(([icon,val,lbl])=>(
+            <div key={lbl} style={{background:"rgba(255,255,255,0.04)",borderRadius:12,padding:12,textAlign:"center"}}>
+              <div style={{fontSize:20,marginBottom:4}}>{icon}</div>
+              <div style={{fontWeight:700,fontSize:16}}>{val}</div>
+              <div style={{fontSize:11,color:"#64748b"}}>{lbl}</div>
+            </div>
+          ))}
+        </div>
+      </GlowCard>
+
+      <div style={{display:"flex",gap:10,marginBottom:16}}>
+        <GlowButton variant="secondary" style={{flex:1}}>💬 Chat</GlowButton>
+        <GlowButton variant="secondary" style={{flex:1}}>🔊 Voice</GlowButton>
+      </div>
+
+      <h3 style={{fontFamily:"'Orbitron',sans-serif",fontSize:15,marginBottom:10}}>🏆 Weekly Leaderboard</h3>
+      <div style={{display:"flex",flexDirection:"column",gap:8}}>
+        {members.map(m => (
+          <GlowCard key={m.id} style={{padding:12}}>
+            <div style={{display:"flex",alignItems:"center",gap:12}}>
+              <div style={{width:34,height:34,borderRadius:8,background:rankColor[m.rank],display:"flex",alignItems:"center",justifyContent:"center",fontWeight:700,fontSize:14,color:"#0f172a"}}>{m.rank}</div>
+              <div style={{flex:1}}>
+                <div style={{display:"flex",alignItems:"center",gap:6}}>
+                  <span style={{fontWeight:600}}>{m.name}</span>
+                  {m.role==="leader" && <span style={{color:"#eab308"}}>👑</span>}
+                </div>
+                <span style={{fontSize:12,color:"#64748b"}}>Level {m.level}</span>
+              </div>
+              <div style={{textAlign:"right"}}>
+                <div style={{fontWeight:700,color:"#06b6d4"}}>{m.contribution.toLocaleString()}</div>
+                <div style={{fontSize:11,color:"#64748b"}}>EXP</div>
+              </div>
+            </div>
+          </GlowCard>
+        ))}
+      </div>
+    </div>
+  );
+}
+
+function ProfilePanel({ user }) {
+  const settings = [
+    { icon:"🛡️", label:"Privacy & Security" },
+    { icon:"🔔", label:"Notifications" },
+    { icon:"🌙", label:"Appearance" },
+    { icon:"❓", label:"Help & Support" },
+  ];
+  return (
+    <div style={{animation:"fadeInUp 0.25s ease"}}>
+      <GlowCard style={{padding:20,marginBottom:12}}>
+        <div style={{display:"flex",alignItems:"center",gap:16}}>
+          <div style={{width:72,height:72,borderRadius:16,background:"linear-gradient(135deg,#06b6d4,#8b5cf6)",display:"flex",alignItems:"center",justifyContent:"center",fontSize:32,fontWeight:900,color:"#0f172a"}}>
+            {user.displayName.charAt(0)}
+          </div>
+          <div style={{flex:1}}>
+            <h2 style={{fontFamily:"'Orbitron',sans-serif",fontSize:18,fontWeight:700}}>{user.displayName}</h2>
+            <p style={{color:"#64748b",fontSize:13}}>@{user.username}</p>
+            <p style={{color:"#475569",fontSize:12,marginTop:2}}>{user.email}</p>
+          </div>
+          <button style={{background:"transparent",border:"none",color:"#06b6d4",cursor:"pointer",fontSize:18}}>✏️</button>
+        </div>
+      </GlowCard>
+
+      <GlowCard style={{padding:16,marginBottom:12}}>
+        <p style={{fontSize:12,color:"#64748b",fontWeight:600,marginBottom:10}}>ACTIVE GOALS</p>
+        <div style={{display:"flex",flexWrap:"wrap",gap:8}}>
+          {user.goals.map(g => {
+            const info = GOALS.find(x=>x.value===g);
+            return (
+              <span key={g} style={{padding:"6px 14px",borderRadius:999,background:"rgba(6,182,212,0.15)",color:"#06b6d4",fontSize:13,fontWeight:500}}>
+                {info?.icon} {info?.label}
+              </span>
+            );
+          })}
+        </div>
+      </GlowCard>
+
+      <div style={{display:"flex",flexDirection:"column",gap:8,marginBottom:12}}>
+        {settings.map(s => (
+          <GlowCard key={s.label} style={{padding:16}}>
+            <button style={{background:"transparent",border:"none",cursor:"pointer",display:"flex",alignItems:"center",gap:12,width:"100%",color:"#fff",fontFamily:"'Inter',sans-serif",fontSize:15}}>
+              <span style={{fontSize:20}}>{s.icon}</span>
+              <span style={{fontWeight:500}}>{s.label}</span>
+            </button>
+          </GlowCard>
+        ))}
+      </div>
+
+      <GlowButton variant="secondary" style={{width:"100%"}}>🚪 Sign Out</GlowButton>
+    </div>
+  );
+}
+
+// ── Main App ──────────────────────────────────────────────────────────────────
+export default function App() {
+  const [activeTab, setActiveTab] = useState("tasks");
+  const [tasks, setTasks] = useState(defaultTasks);
+  const [isLevelingUp, setIsLevelingUp] = useState(false);
+  const [user, setUser] = useState({
+    id: generateId(), email:"user@gmail.com", username:"guardian_x7",
+    displayName:"Neon Guardian", goals:["fitness","study"],
+    level:7, exp:450, expToNext: EXP_PER_LEVEL(7),
+    stats:{ strength:10,endurance:10,intelligence:10,discipline:10,charisma:10,vitality:10 },
+  });
+
+  const addExp = useCallback((amount) => {
+    setUser(prev => {
+      let newExp = prev.exp + amount;
+      let newLevel = prev.level;
+      let newExpToNext = prev.expToNext;
+      let leveled = false;
+      while (newExp >= newExpToNext) {
+        newExp -= newExpToNext; newLevel++; newExpToNext = EXP_PER_LEVEL(newLevel); leveled = true;
+      }
+      if (leveled) { setIsLevelingUp(true); setTimeout(()=>setIsLevelingUp(false),3000); }
+      return {...prev, exp:newExp, level:newLevel, expToNext:newExpToNext};
+    });
+  },[]);
+
+  const completeTask = useCallback((id, data) => {
+    setTasks(prev => prev.map(t => t.id===id ? {...t,completed:true,data} : t));
+  },[]);
+
+  const panels = {
+    tasks:   <TasksPanel tasks={tasks} onComplete={completeTask} onAddExp={addExp}/>,
+    stats:   <StatsPanel stats={user.stats} level={user.level}/>,
+    squad:   <SquadPanel/>,
+    profile: <ProfilePanel user={user}/>,
+  };
+
+  return (
+    <>
+      <style>{css}</style>
+      <div style={{minHeight:"100vh",background:"#020617",fontFamily:"'Inter',sans-serif"}}>
+        <Header user={user} isLevelingUp={isLevelingUp}/>
+        <main style={{maxWidth:480,margin:"0 auto",padding:"16px 16px 100px"}}>
+          {panels[activeTab]}
+        </main>
+        <Navigation active={activeTab} onChange={setActiveTab}/>
+        <LevelUpOverlay isVisible={isLevelingUp} level={user.level}/>
+      </div>
+    </>
+  );
+}
